@@ -1,0 +1,173 @@
+# Active Directory Breach Simulation — System Hacking Phases
+
+**Course:** SEC311 Ethical Hacking
+**Alignment:** CEH v13 — System Hacking Phases and Attack Techniques
+**Environment:** Isolated training lab using Kali Linux, Windows Server, and Windows 11
+
+> **Lab Safety Notice:** This activity was completed inside an isolated and authorized training environment. The techniques documented here are intended for education, defensive understanding, and ethical security testing only. They should never be used against systems without permission.
+
+---
+
+## Objective
+
+The objective of this lab was to work through the major phases of a system-hacking scenario inside a Windows Active Directory environment. I wanted to understand not only how each attack phase worked, but also what evidence it created and how a defender could detect or prevent it.
+
+The attack path followed this general sequence:
+
+**Enumeration → Initial Access → Privilege Escalation → Data Concealment → Exfiltration → Cleanup and Restoration**
+
+---
+
+## Phase 1 — Enumeration and Credential Reuse
+
+The lab started with reconnaissance information from an earlier scan and a database dump from a vulnerable web application. While reviewing the database, I noticed that two user accounts had the exact same password hash. Because the hashes were identical and unsalted, it strongly suggested that both users were using the same password.
+
+I then used LDAP enumeration to map the Active Directory environment, including users, groups, memberships, and relationships. After comparing the web application credentials with the domain accounts, I found that one user had reused the same password for their domain account.
+
+### What I Learned
+
+Credential reuse can give an attacker access to additional systems without needing a new exploit. Once a password is exposed in one place, the attacker may test it against other services and accounts.
+
+### Defender Takeaway
+
+Organizations should require unique passwords, use properly salted password hashes, and monitor for unusual authentication activity across different systems.
+
+---
+
+## Phase 2 — Initial Access and Horizontal Movement
+
+Using the reused credentials, I attempted to authenticate to the domain controller through Windows Remote Management using `evil-winrm`. One account failed, but the account with the reused password successfully authenticated and provided a standard user shell.
+
+This represented horizontal movement because I moved from access to one service into the domain environment without gaining additional privileges yet.
+
+### What I Learned
+
+A reused credential can allow an attacker to move into another part of the network while still appearing to use a legitimate account.
+
+### Defender Takeaway
+
+Remote management services such as WinRM should only be available to approved users and systems. Unexpected or unusual WinRM authentication attempts should be monitored and investigated.
+
+---
+
+## Phase 3 — Vertical Privilege Escalation
+
+After gaining access, I checked my current identity and group memberships. My account was still a standard domain user and did not belong to Domain Admins.
+
+However, further enumeration revealed a group-permission misconfiguration. The group my account belonged to had permission to modify the Domain Admins group. Because of that delegated permission, I was able to add my own account to Domain Admins using built-in Windows commands.
+
+This was vertical privilege escalation because my account moved from standard-user access to full domain-administrator privileges.
+
+### What I Learned
+
+The escalation did not come from malware, password cracking, or a software vulnerability. It came from a permission that had been configured incorrectly. That made the attack especially interesting because the commands themselves were legitimate and expected by Windows.
+
+### Defender Takeaway
+
+Administrators should regularly review privileged groups, nested group memberships, and delegated permissions. Changes to groups such as Domain Admins should generate immediate, high-priority alerts. Tools such as BloodHound can also help defenders identify dangerous privilege paths before attackers do.
+
+---
+
+## Phase 4 — Data Concealment with Steganography
+
+After obtaining administrative access, I located a sensitive file on a protected network share. I then used steganography to embed the file inside a normal image.
+
+The image still appeared ordinary when opened, even though it contained hidden data.
+
+### Why Steganography Matters
+
+Encryption protects the contents of a file, but an encrypted file may still look suspicious during a transfer. Steganography attempts to hide the existence of the data by placing it inside another file, such as an image.
+
+### Defender Takeaway
+
+Security teams should not only monitor for encrypted files. They should also look for unusually large image files, abnormal file transfers, unexpected destinations, and file types that do not match their expected contents.
+
+---
+
+## Phase 5 — Data Exfiltration
+
+I transferred the image containing the hidden file through SMB, simulating the removal of sensitive data from the environment. After the transfer, I extracted the original file from the image to confirm that the process worked from beginning to end.
+
+One thing I noticed was that the attack path was not completely frictionless. When I attempted to access the protected share, I was still prompted for network credentials. That additional control could have stopped the attack if I had not been able to authenticate successfully.
+
+### What I Learned
+
+Administrative privileges do not always guarantee unrestricted access to every file. Proper file and share permissions can still slow down or block an attacker after another security control has failed.
+
+### Defender Takeaway
+
+File-level permissions remain important even if an attacker gains elevated privileges. This lab showed why defense in depth matters: one remaining control can still interrupt the attack chain.
+
+---
+
+## Phase 6 — Covering Tracks and Restoring the Environment
+
+The final phase involved removing evidence of the activity and restoring the lab environment. This also demonstrated that covering tracks is rarely perfect.
+
+### PowerShell History
+
+Clearing the visible PowerShell session history did not remove everything. The PSReadLine history file remained stored on disk and required separate attention.
+
+### Tool Removal
+
+Removing the installed tools and deleting the installer files did not remove every trace. Installation and removal activity could still remain inside Windows logs.
+
+### Event Logs
+
+Clearing the application event log created another event showing that the log had been cleared. Instead of completely hiding the activity, the cleanup process created an additional indicator that something suspicious had occurred.
+
+### Privilege Restoration
+
+I also removed my account from Domain Admins so the environment returned to its original state.
+
+### What I Learned
+
+Deleting files or clearing logs does not guarantee that all evidence is gone. The attempt to remove evidence may create new evidence of its own.
+
+### Defender Takeaway
+
+Centralized logging is one of the strongest protections against local log tampering. When event logs are forwarded to a SIEM or another protected system in real time, an attacker may be able to clear the local copy but not the centralized record.
+
+---
+
+## Attack, Detection, and Mitigation Summary
+
+| Phase                | Attacker Activity              | Possible Detection                      | Recommended Mitigation             |
+| -------------------- | ------------------------------ | --------------------------------------- | ---------------------------------- |
+| Credential reuse     | Reused an exposed password     | Unusual authentication patterns         | Unique passwords and salted hashes |
+| Horizontal movement  | Connected through WinRM        | Unexpected remote-management logins     | Restrict and monitor WinRM         |
+| Privilege escalation | Abused group permissions       | Changes to privileged groups            | Audit delegation and group nesting |
+| Data concealment     | Hid data inside an image       | Unusual file size or content            | DLP and content inspection         |
+| Exfiltration         | Transferred data through SMB   | Unusual file access or destination      | Strong file and share permissions  |
+| Covering tracks      | Removed tools and cleared logs | Log-clearing events and missing records | Centralized log forwarding         |
+
+---
+
+## Reflection
+
+The biggest lesson I took away from this lab was that the same technical knowledge can be used from both the offensive and defensive sides of cybersecurity.
+
+Every step I completed as an attacker created some type of evidence, whether it was a login event, a privileged-group change, a file transfer, or an attempt to clear logs. Understanding how the attack works makes it easier to understand what defenders should monitor.
+
+This is the kind of experience I want to continue building: learning how systems are attacked while also learning how to detect, investigate, and prevent that activity.
+
+---
+
+## Tools Used
+
+* `evil-winrm`
+* `ldapdomaindump`
+* Native Windows `net` commands
+* SMB tools
+* Steganography tools
+* Windows Event Viewer
+* PowerShell
+* Kali Linux
+
+---
+
+## AI Assistance
+
+Kali GPT and ShellGPT were used during the lab to help translate plain-English goals into commands and assist with troubleshooting.
+
+The AI-generated commands still required review before execution. In some cases, the suggested flags or syntax did not fully match the environment. One of the most important lessons was that using AI effectively still requires enough technical understanding to verify whether its output is correct, safe, and relevant.
