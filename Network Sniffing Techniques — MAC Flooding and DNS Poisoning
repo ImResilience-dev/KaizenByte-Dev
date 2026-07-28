@@ -1,0 +1,212 @@
+# Network Sniffing Techniques — MAC Flooding and DNS Poisoning
+
+**Course:** SEC311 Ethical Hacking
+**Alignment:** CEH v13 — Sniffing and Network Hacking
+**Environment:** Isolated training lab using Kali Linux, Windows 11, and Windows Server
+
+> **Lab Safety Notice:** This activity was completed inside an isolated and authorized training environment. The techniques documented here are intended for education, defensive understanding, and ethical security testing only. They should never be used against systems without permission.
+
+---
+
+## Objective
+
+The goal of this lab was to reproduce two network-based attacks: a Layer 2 MAC-flooding attack and an application-layer DNS-manipulation attack.
+
+I wanted to understand why each technique works, what evidence it can create, and how defenders could detect or prevent it.
+
+Both exercises demonstrated a similar problem: older networking protocols often trust information without having a strong way to verify whether it is legitimate.
+
+---
+
+## Background — What Network Sniffing Means
+
+Network sniffing is the process of capturing and examining traffic moving through a network.
+
+On older Ethernet hubs, traffic was repeated to every connected device, which made passive interception relatively easy. Modern switches reduce this exposure by learning which MAC addresses are connected to each port and forwarding frames only where they need to go.
+
+Attackers may attempt to manipulate this behavior so that traffic becomes visible from a port that should not normally receive it.
+
+DNS manipulation takes a different approach. Instead of making additional packets visible, it changes where a victim’s traffic is sent by returning a false IP address for a legitimate domain.
+
+---
+
+## Attack 1 — MAC Flooding with macof
+
+### How It Works
+
+A switch maintains a **Content Addressable Memory table**, commonly called a CAM or MAC-address table. This table maps learned MAC addresses to physical switch ports.
+
+When a frame arrives, the switch uses the destination MAC address to determine where the frame should be forwarded.
+
+The `macof` tool, which is included in the `dsniff` suite, generates frames containing randomly created source MAC addresses. A vulnerable switch may attempt to learn each forged address on the attacker’s port.
+
+If the table reaches capacity or legitimate entries are displaced, the switch may no longer know the correct destination port for some traffic. It may then flood unknown-unicast frames through other ports in the same VLAN.
+
+This could allow a nearby attacker to observe traffic that would not normally appear on the attacker’s port.
+
+Modern managed switches may respond differently. Port security, hardware protections, or MAC-learning limits may prevent the table from being overwhelmed.
+
+### What I Ran
+
+```bash
+sudo macof -i eth0 -n 100
+```
+
+The `-i` option selected the `eth0` network interface, while `-n 100` instructed the tool to generate 100 packets.
+
+Each generated frame used forged addressing information, including changing source MAC addresses.
+
+### What I Learned
+
+The attack does not directly exploit a software vulnerability in the switch. Instead, it abuses the normal process the switch uses to learn which devices are connected to its ports.
+
+I also learned that generating spoofed frames does not automatically prove that the switch’s CAM table was successfully exhausted. Confirming the full effect would require reviewing the switch table, switch logs, or captured traffic from another system.
+
+### Defender Takeaway
+
+**Port security** is one of the most direct countermeasures. It limits how many MAC addresses may be learned from one physical port.
+
+If one device suddenly generates hundreds or thousands of different source MAC addresses, the switch can discard the traffic, generate an alert, restrict the port, or disable it.
+
+Other possible indicators include:
+
+* A rapid increase in unique source MAC addresses
+* Many MAC addresses learned from one switch port
+* CAM-table instability or rapid entry changes
+* Port-security violations
+* Spikes in unknown-unicast or broadcast traffic
+* Unusual bursts of similarly structured Ethernet frames
+
+Detection depends heavily on visibility. Switch telemetry, port-security logs, packet captures, and properly positioned network sensors may all help identify the activity.
+
+---
+
+## Attack 2 — DNS Manipulation with DNSChef
+
+### How It Works
+
+The Domain Name System translates names such as `microsoft.com` into IP addresses.
+
+Traditional DNS does not cryptographically verify every response by default. A client normally trusts its configured DNS resolver to return the correct answer.
+
+In this exercise, the Windows client was manually configured to use the Kali Linux system at `192.168.0.5` as its preferred DNS server. DNSChef then acted as a rogue DNS server and returned a forged response for `microsoft.com`.
+
+This caused the client to associate the legitimate domain name with the Kali system’s IP address.
+
+### What I Ran
+
+On the Windows 11 client, I changed the preferred DNS server to:
+
+```text
+192.168.0.5
+```
+
+I then started DNSChef on Kali Linux:
+
+```bash
+dnschef --fakeip=192.168.0.5 --fakedomains=microsoft.com --interface=0.0.0.0
+```
+
+Back on Windows, I tested the result with:
+
+```cmd
+nslookup microsoft.com
+```
+
+The lookup showed `microsoft.com` resolving to `192.168.0.5` instead of one of Microsoft’s legitimate addresses.
+
+### What I Learned
+
+The exercise worked because the victim system had been configured to trust the attacker-controlled DNS server.
+
+DNSChef did not need to compromise Microsoft or alter the legitimate domain. It only needed to control the answer provided to the client.
+
+In a real attack, the attacker would first need a way to make the victim use the rogue DNS server. Possible methods could include rogue DHCP, compromised router settings, malware, or unauthorized changes to local network configuration.
+
+### Defender Takeaway
+
+Organizations should restrict clients to approved DNS resolvers and monitor for unauthorized systems responding on UDP or TCP port 53.
+
+Possible indicators include:
+
+* A workstation unexpectedly operating as a DNS server
+* Public domains resolving to private or internal IP addresses
+* DNS settings changing without authorization
+* Queries being sent to unapproved resolvers
+* Unusual TTL values or inconsistent DNS answers
+* Certificate errors appearing after a domain resolves to a different system
+
+**DNSSEC** can reduce this risk by allowing validating resolvers to verify that signed DNS records have not been modified. Its effectiveness depends on the domain being signed and validation being performed by a trusted resolver or client.
+
+Additional defenses include:
+
+* DHCP snooping
+* Approved DNS allowlists
+* Blocking direct DNS traffic to unauthorized resolvers
+* Endpoint configuration monitoring
+* DNS logging and anomaly detection
+* Network segmentation
+
+---
+
+## Lab Activities and Related Sniffing Techniques
+
+| Technique        | How It Works                                                           | Possible Detection                                               | Mitigation                                          |
+| ---------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------- |
+| MAC flooding     | Generates many forged MAC addresses to disrupt switch learning         | Rapid MAC growth, port-security alerts, unknown-unicast spikes   | Port security and MAC-learning limits               |
+| DNS manipulation | A rogue resolver returns a false IP address                            | Unauthorized DNS server, unusual resolution, private IP response | Trusted resolvers, DNSSEC validation, DNS filtering |
+| ARP poisoning    | Forged ARP replies associate an attacker’s MAC address with another IP | MAC-to-IP mapping changes and unsolicited ARP replies            | Dynamic ARP Inspection                              |
+| DHCP spoofing    | A rogue DHCP server provides malicious network settings                | DHCP offers from an unauthorized source                          | DHCP snooping                                       |
+
+> The MAC-flooding and DNSChef techniques were performed during this lab. ARP poisoning and DHCP spoofing are included as related techniques from the course material.
+
+---
+
+## The Last Line of Defense — TLS
+
+Even if a DNS attack redirects a victim to the wrong server, TLS may still prevent the attacker from successfully impersonating the intended website.
+
+The attacker would normally need a certificate that the browser accepts for the legitimate domain. Without one, the browser may display warnings such as:
+
+* Certificate name mismatch
+* Untrusted certificate authority
+* Expired or invalid certificate
+* Incomplete certificate chain
+
+For websites protected by HTTP Strict Transport Security, the browser may refuse to allow the user to bypass certain certificate errors.
+
+TLS does not stop the false DNS response itself, but it can prevent the attacker-controlled server from convincingly impersonating the legitimate website.
+
+---
+
+## Reflection
+
+The most important theme across these exercises was trust.
+
+A switch learns source MAC addresses from the frames it receives. A DNS client trusts its configured resolver to provide the correct IP address. When those sources of information are not properly controlled or verified, an attacker may be able to manipulate the network’s behavior.
+
+The defensive lesson is not simply to memorize individual attacks. It is to identify where a system accepts information based on trust and ask what controls verify that information.
+
+Port security limits which MAC addresses may appear on a switch port. Trusted DNS resolvers limit who may answer DNS requests. DNSSEC provides cryptographic validation for supported records. TLS helps verify the identity of the destination after name resolution occurs.
+
+Understanding these trust relationships helps connect the offensive technique to the defensive control designed to stop it.
+
+---
+
+## Tools Used
+
+* `macof`
+* `dsniff`
+* `dnschef`
+* `nslookup`
+* Kali Linux
+* Windows 11
+* ShellGPT
+
+---
+
+## AI Assistance
+
+ShellGPT was used to translate plain-English goals into possible `macof` and DNSChef commands.
+
+The generated syntax still required review before execution. AI helped speed up the process of identifying commands, but it did not replace the need to understand each option, verify that the command matched the lab environment, and confirm what the output actually proved.
