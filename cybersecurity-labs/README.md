@@ -12,5 +12,6 @@ All material in this repository is intended for use only in isolated lab environ
 - `cryptography-and-bitlocker-lab/` — Hashing, file encryption, and BitLocker learning materials.
 - `network-sniffing-defense-lab/` — Network-sniffing risks, detection indicators, and mitigations.
 - `dos-defense-and-mitigation/` — Denial-of-service resilience and defensive planning.
+- `security-operations/` — SOC-focused labs: log analysis, malware analysis, incident investigation, and detection engineering.
 
 Each lab should include a purpose statement, authorized lab scope, sanitized evidence, findings, and defensive controls.
