@@ -1,105 +1,269 @@
 # SEC335 Module 1 — Incident Response Procedures, Forensics, and Forensic Analysis
 
-| Field | Detail |
-|---|---|
-| Course | DeVry University — SEC335 |
-| Author | ImResilience-dev |
-| Status | Completed |
-| Report date | October 31, 2026 |
-| Environment | Authorized educational Windows lab |
-| Focus | FTP authentication analysis and incident response reasoning |
+**Author:** ImResilience-dev  
+**Course:** DeVry University, SEC335  
+**Lab status:** Completed  
+**Focus:** Network reconnaissance, credential attacks, Windows live response, and FTP log analysis
 
 ## Overview
 
-I completed this lab to practice interpreting authentication activity from an investigator's perspective. I examined Windows FTP logs, identified repeated administrator login failures, and compared those failures with successful FTP responses in separate sessions.
+I completed this lab from both sides of an incident: first as an attacker identifying exposed services and recovering a weak credential, then as an incident responder collecting host information and examining authentication logs.
 
-My main finding was a pattern consistent with password guessing against the administrator account. I also identified successful FTP responses, but the visible records did not establish that the administrator guessing sequence succeeded. This distinction shaped my analysis: I treated each record as evidence of a specific event rather than proof of a broader compromise.
+I used Nmap and Zenmap to investigate the lab's external interface, Bruter to perform an FTP dictionary attack, and Remote Desktop to access the Windows Server with the recovered account. I then switched to the server console, used the supplied incident response tools to collect system information into a report, calculated a file hash, and reviewed the FTP logs for failed and successful authentication.
 
-## Scope and objectives
+The exercise showed me how an exposed service and weak administrative credential can create a path to remote access—and how a responder can use network connections, processes, accounts, and logs to investigate that activity.
 
-I limited this work to the authorized course lab. My objectives were to locate the FTP logs, interpret authentication records, identify suspicious patterns, and explain what additional evidence I would need before declaring a compromise.
+## Lab environment
 
-The earlier lab discussion also referenced Nmap/Zenmap reconnaissance, a Bruter password exercise, RDP access, and incident response collection. The original outputs for those activities are not available with this report. I therefore focus my verified findings on the two retained screenshots and do not list scan results, recovered credentials, collection commands, or RDP outcomes as independently verified.
+I worked within the course's isolated network. The external address represented the lab firewall; the Windows Server was on the internal network.
 
-## My investigation process
+| Component | Lab role / address |
+|---|---|
+| Windows 8.1 | External attack workstation, 175.45.176.200 |
+| pfSense | External interface: 203.0.113.100; LAN interface: 192.168.1.254 |
+| Windows Server 2008 | Internal target, 192.168.1.10 |
+| Metasploitable | Additional internal host, 192.168.1.30 |
+| IR_TOOLS (E:) | Supplied incident response toolset |
 
-The lab procedure directed me to the following FTP logging directory:
+![Lab network topology](evidence/topology.png)
 
-`C:\Windows\System32\LogFiles\MSFTPSVC1`
+*Figure 1. Course topology showing the external workstation, firewall, and internal hosts.*
 
-I reviewed the displayed records in **ex261031.log** and **flag6.log** in Notepad. The procedure called for searching for **230** to locate successful logins; my challenge screenshot also shows a search for the challenge marker.
+The course reference figures illustrate the lab workflow; my session log captures appear in the log-analysis section. The [screenshot index](evidence/README.md) identifies both sets. Credentials and challenge answers are redacted.
 
-I compared timestamps, client addresses, session identifiers, commands, and response codes. I kept the two files separate because their visible records represent different contexts. I did not assume that a success in one file explained failures in the other.
+## 1. Reconnaissance: identifying exposed services
 
-## Evidence and findings
+I began from the external Windows workstation with a basic Nmap scan:
 
-### 1. Repeated administrator login failures
+```cmd
+nmap 203.0.113.100
+```
 
-![Dated FTP log with sensitive password arguments redacted](evidence/ftp-authentication-log-redacted.png)
+My purpose was to identify reachable services before selecting an attack path. An open port indicates that a service accepted probes; identifying its software requires additional service detection.
 
-*Figure 1. My dated-log screenshot. A solid black rectangle covers the two potentially sensitive PASS arguments; the response codes remain visible.*
+![Nmap discovery scan](evidence/nmap-scan.png)
 
-In Figure 1, I identified repeated **USER administrator** records with response **331**, followed by **PASS - 530 1326**, at the displayed time **22:46:58**. The same client address and session **[4]** appear repeatedly.
+*Figure 2. Basic scan output from the course reference.*
 
-I interpreted this as a pattern consistent with password guessing. The repeated failures support that assessment, but the screenshot does not establish the complete number of attempts, the duration of the activity, or the tool responsible. I treated the recorded client address as a lab log field, not as proof of a person's identity or geographic location.
+I then launched Zenmap, entered the same target, and selected the **Intense scan** profile. The displayed command was:
 
-### 2. Earlier successful FTP responses
+```cmd
+nmap -T4 -A -v 203.0.113.100
+```
 
-At **22:45:31**, Figure 1 also shows two **230 0** responses to PASS commands in sessions **[3]** and **[2]**, using the same recorded client address.
+I used the **Ports / Hosts** view to connect port numbers with service-detection results. Zenmap is Nmap's [official graphical interface](https://nmap.org/zenmap/); it made the scan configuration and results easier to review.
 
-I identified these as successful FTP responses. However, the corresponding USER records are outside the visible excerpt, so I cannot identify the successful account from this screenshot. These successes also precede the displayed administrator failures. I cannot use them to conclude that the later administrator attempts succeeded.
+![Zenmap service results](evidence/zenmap-services.png)
 
-### 3. Loopback activity in the challenge log
+*Figure 3. Service detection in the supplied lab reference.*
 
-![Loopback FTP log with the numeric challenge answer redacted](evidence/ftp-loopback-challenge-redacted.png)
+The lab reference displayed the following exposed services:
 
-*Figure 2. My challenge-log screenshot. The answer is redacted; the loopback address, session identifier, and success response remain visible.*
-
-In **flag6.log**, I identified a **PASS - 230** entry from **127.0.0.1**, session **[3]**, at **03:57:19**, alongside a lab challenge marker. Other visible records include **USER ftp**, **created /hi.txt**, and **QUIT**.
-
-I recognized 127.0.0.1 as the loopback address. I therefore treated this as local lab activity rather than evidence that the client shown in Figure 1 gained access. The visible creation record also does not establish the file's contents or demonstrate exfiltration.
-
-I located the challenge marker but have omitted its value from this public report. I do not claim a platform score or challenge-submission result.
-
-### How I interpreted the codes
-
-| Code | Meaning | How I used it |
+| TCP port | Service shown | Investigative significance |
 |---|---|---|
-| 331 | Server requests a password | I treated it as an intermediate step, not proof of valid credentials or a completed login. |
-| 530 | Not logged in | I used it to identify failed FTP authentication. |
-| 230 | User logged in | I identified success while checking the session and account context. |
-| 1326 | Windows ERROR_LOGON_FAILURE | I used it as additional failure status accompanying 530. |
+| 21 | Microsoft FTP | Authentication endpoint used for the dictionary exercise |
+| 23 | Telnet | Additional remote-access exposure |
+| 25 / 110 | SMTP / POP3 | Mail services |
+| 80 / 443 | Apache HTTP services | Web-facing attack surface |
+| 1099 | Java RMI Registry | Additional remotely reachable service |
+| 3306 | MySQL | Database exposure |
+| 3389 | Microsoft Terminal Service | Remote Desktop endpoint |
+| 5432 | PostgreSQL | Database exposure |
+| 8180 | Apache Tomcat / Coyote | Additional web application service |
 
-I checked FTP response meanings against [RFC 959](https://datatracker.ietf.org/doc/html/rfc959). Microsoft identifies 1326 as ERROR_LOGON_FAILURE in its [Windows support documentation](https://support.microsoft.com/en-us/servicing/os/windows-server/2017/01/error-1326-when-you-change-domain-account-password-in-windows).
+I focused on FTP and RDP because they formed the access path exercised in this lab. The scan also reinforced the value of reducing unnecessary services at a network boundary.
+
+## 2. Credential attack: testing the FTP administrator account
+
+I configured Bruter with the external target, **FTP**, port **21**, the **administrator** account, and the supplied **Wordlist.txt** dictionary. I started the test and used its result to obtain the lab account credential.
+
+![Bruter dictionary configuration](evidence/bruter-start.png)
+
+*Figure 4. Target, protocol, account, and dictionary configuration.*
+
+![Bruter completed result with password redacted](evidence/bruter-result-redacted.png)
+
+*Figure 5. Completed dictionary-test result. The recovered password is intentionally covered.*
+
+This was a dictionary attack: Bruter tested candidate passwords from a list against the FTP service. It did not require exploitation of a software vulnerability. The weakness was an administrative credential that could be guessed through an exposed authentication service.
+
+This step helped me connect password policy to practical risk. A privileged account increases the impact of a successful guess, especially when the same credential is accepted by another remote-access service.
+
+## 3. Remote access: using the recovered credential
+
+I checked RDP exposure with a targeted scan:
+
+```cmd
+nmap 203.0.113.100 -p 3389
+```
+
+![Targeted scan of RDP port 3389](evidence/rdp-port-scan.png)
+
+*Figure 6. RDP port check in the course reference.*
+
+I launched the Windows Remote Desktop client with **mstsc**, connected to the lab's external address, and authenticated with the recovered administrator credential. This opened the Windows Server desktop.
+
+![Windows Server desktop through RDP](evidence/rdp-desktop.png)
+
+*Figure 7. Remote Windows Server desktop shown in the lab workflow.*
+
+The important result was the transition from credential recovery over FTP to interactive access through RDP. I demonstrated why protecting each service separately is insufficient when a privileged credential provides access across services.
+
+## 4. Incident response: collecting host information
+
+I switched from the attack workstation to the Windows Server console and opened **cmd.exe** from **IR_TOOLS (E:)**. I set and displayed the command search path:
+
+```cmd
+PATH=E:\
+PATH
+```
+
+![Incident response tool drive](evidence/trusted-tools.png)
+
+*Figure 8. Supplied response tools and command shell on the E: drive.*
+
+Using the supplied toolset reduced reliance on executables installed on the host. Setting PATH directed command lookup toward that tool directory; it was not, by itself, a guarantee that the host or every executable was trustworthy.
+
+### Creating the collection record
+
+I created **IR.TXT**, recorded the responder label, and appended the collection date and time:
+
+```cmd
+echo Incident Responder Student > IR.TXT
+date /t >> IR.TXT
+time /t >> IR.TXT
+```
+
+The distinction between the redirection operators mattered: **>** created or replaced the file, while **>>** appended subsequent results. I used **type IR.TXT** to review the accumulated output.
+
+### Collecting network, process, and account information
+
+I followed this collection sequence:
+
+| Command | Information I collected | Why it mattered |
+|---|---|---|
+| ipconfig /all | Adapter configuration, IP and MAC addresses, gateway, and DNS settings | Established the host's network identity and configuration |
+| netstat -ano | Connections, listening endpoints, numerical addresses, and owning PIDs | Supported connection-to-process correlation |
+| tasklist | Running processes and their PIDs | Provided process context for network activity |
+| psloggedon | Local and resource-share logon information | Helped identify accounts associated with host access |
+| net user | Local account list | Supported review of available accounts |
+| time /t | Closing time entry | Marked the end of the collection sequence |
+
+```cmd
+ipconfig /all >> IR.TXT
+netstat -ano >> IR.TXT
+tasklist >> IR.TXT
+psloggedon >> IR.TXT
+net user >> IR.TXT
+time /t >> IR.TXT
+```
+
+![Example network information recorded in IR.TXT](evidence/ir-network-output.png)
+
+*Figure 9. Course example of the collected network configuration. The responder name and date belong to the course example.*
+
+I used these filters to review relevant entries:
+
+```cmd
+type IR.TXT | find "3389"
+type IR.TXT | find "svchost"
+type IR.TXT | find "administrator"
+type IR.TXT | find "Guest"
+```
+
+For **netstat -ano**, **-a** includes active connections and listening ports, **-n** keeps addresses and ports numeric, and **-o** includes process IDs. I could use that PID to look up the associated process in tasklist. A listening RDP port describes exposure; an established connection describes an active connection. Those states answer different questions. See [Microsoft's netstat documentation](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netstat).
+
+I also learned to interpret the filters in context. An svchost entry is not inherently malicious, a Guest account listing does not establish that it is enabled, and PsLoggedOn is a snapshot rather than a complete logon history. [Microsoft's PsLoggedOn documentation](https://learn.microsoft.com/en-us/sysinternals/downloads/psloggedon) explains its local and resource-share logon reporting.
+
+### Hashing the collection file
+
+After completing the collection, I generated an MD5 digest of IR.TXT and saved the output separately:
+
+```cmd
+md5sum IR.TXT >> hash.txt
+type hash.txt
+```
+
+The separate hash file gave me a reference for checking whether the collected file changed afterward. I completed the lab's MD5 procedure; for a modern evidence workflow, I would also record SHA-256 and maintain acquisition and transfer records. A matching file hash supports integrity checking, while custody documentation explains who handled the evidence and when.
+
+## 5. Log analysis: examining the authentication trail
+
+I navigated to:
+
+```text
+C:\Windows\System32\LogFiles\MSFTPSVC1
+```
+
+I opened the dated FTP log in Notepad and searched for **230** to locate successful logins. I compared successful responses with the repeated authentication failures surrounding the password exercise.
+
+![Searching FTP logs for response 230](evidence/ftp-log-search.png)
+
+*Figure 10. Course reference showing repeated failures and a highlighted success response.*
+
+### Interpreting the records
+
+| Field / code | Meaning | How I used it |
+|---|---|---|
+| Timestamp | Recorded event time | Placed activity within each log's sequence |
+| Client address | Recorded connection source | Grouped activity from the same source |
+| Session identifier | FTP session context | Kept different sessions distinct |
+| USER | Submitted account name | Identified the account being attempted |
+| 331 | Password requested | Recognized an intermediate authentication response |
+| 530 | Not logged in | Identified unsuccessful authentication |
+| 230 | User logged in | Located successful authentication |
+| 1326 | Windows logon failure status | Added context to the failed password attempts |
+
+FTP reply meanings follow [RFC 959](https://datatracker.ietf.org/doc/html/rfc959).
+
+### My session findings
+
+![Session FTP authentication log with password fields redacted](evidence/ftp-authentication-log-redacted.png)
+
+*Figure 11. My session capture of ex261031.log.*
+
+In my dated log, I identified repeated **USER administrator** entries followed by **530 1326**, using the same recorded client address and session **[4]**, at **22:46:58**. The repeated failures were consistent with the password-guessing activity practiced in the lab.
+
+I also found **230** responses at **22:45:31** in sessions **[2]** and **[3]**. I kept those earlier successes separate from the later administrator failures. To reconstruct an individual login, I would match its USER and PASS records within the same session.
+
+![Loopback challenge log with answer redacted](evidence/ftp-loopback-challenge-redacted.png)
+
+*Figure 12. My session capture of flag6.log.*
+
+The challenge log contained a successful response from **127.0.0.1**, the loopback address. I treated that as local lab activity, distinct from the externally sourced entries in the dated log.
+
+This comparison was the key forensic lesson: a response code identifies the outcome of a particular event. The account, source, session, and time explain how that event fits the investigation. My RDP access was a separate stage of the exercise, rather than a conclusion drawn solely from an FTP success code.
 
 ## Discussion questions
 
-**1. Where are the logs located in Windows?**
+| Question | My answer |
+|---|---|
+| What is the purpose of Nmap? | I used it to discover reachable services and investigate the network's exposed attack surface. |
+| What is Zenmap? | Nmap's official graphical interface; I used its scan profile and service-results view. |
+| What is the purpose of Bruter? | In this lab, I used it to test dictionary passwords against FTP authentication. |
+| What is ipconfig? | A Windows command for viewing network configuration; /all provides detailed adapter information. |
+| What is netstat? | A connection and endpoint inspection tool; I used -ano to include numerical endpoints and PIDs. |
+| What is psloggedon? | A Sysinternals tool for reporting local and resource-share logons. |
+| What is md5sum? | A utility that calculates an MD5 file digest for comparison during integrity checks. |
+| Where are the logs located? | This lab's FTP logs were under C:\Windows\System32\LogFiles\MSFTPSVC1. Windows event logs are also accessible through Event Viewer. |
+| What does MSFTPSVC1 contain? | FTP service logs with timestamps, client addresses, commands, session context, and response/status codes. |
 
-For this lab, I examined FTP logs in **C:\Windows\System32\LogFiles\MSFTPSVC1**. This is the FTP logging location used by this environment, not a universal location for all Windows logs. I would use Event Viewer to examine Windows application, security, and system events.
+## Defensive recommendations
 
-**2. What is stored in the MSFTPSVC1 directory?**
+The access path I exercised points to several practical controls:
 
-In this environment, it contains Microsoft FTP service log files. I used their timestamps, client addresses, session identifiers, commands, and response/status codes to examine authentication activity.
+- Restrict externally reachable services to those required, especially administrative access.
+- Keep privileged accounts out of routine FTP use and protect them with strong, unique credentials.
+- Apply rate limiting or appropriate lockout controls, and alert on repeated failures and unexpected successes.
+- Place remote administration behind approved access controls and use MFA where supported.
+- Preserve service and Windows authentication logs centrally to support correlation and retention.
+- Maintain a prepared response toolset and a repeatable collection procedure; use supported systems and secure transfer protocols.
 
-## My incident response recommendations
+These recommendations follow from the exercise; the lab's hands-on response work focused on collection and analysis.
 
-Based on these findings, my next steps in an actual investigation would be:
+## Skills demonstrated and interview takeaway
 
-1. **Preserve the evidence.** I would retain the original FTP logs and relevant Windows events, document acquisition details and clock settings, calculate acquisition hashes, and analyze working copies.
-2. **Correlate successful sessions.** I would locate the USER records for sessions [2] and [3], examine subsequent file operations, and check Windows authentication and remote-access events before asserting RDP access.
-3. **Measure the activity.** I would use the complete dated log to establish attempt counts and time ranges rather than estimate them from a screenshot.
-4. **Reduce exposure.** I would review whether FTP access is necessary, restrict privileged accounts, investigate affected credentials, and monitor repeated failures and unexpected successes.
-5. **Address the legacy environment.** For production, I would use supported systems and a protected file-transfer service appropriate to the organization's requirements.
+I practiced network discovery, service interpretation, dictionary-attack testing, Remote Desktop access, Windows live-response collection, output redirection, file hashing, and authentication-log analysis.
 
-These are proposed actions; I am not claiming that I completed containment, credential rotation, or forensic acquisition in the documented portion of this lab.
+My main takeaway is that collecting output is only the first step. I need to explain what each artifact means and connect it to the right question: what was exposed, how access was obtained, what the host was doing, and what the logs recorded.
 
-## Evidence limits and handling
-
-My available evidence consists of two screenshots and the supplied log-review procedure. I do not have the complete original logs, acquisition hashes, validated clock settings, or collection outputs. I report the screen times as displayed and do not combine the two files into a validated absolute timeline.
-
-The screenshots retain their original dimensions, with no pixel changes outside the documented redaction rectangles. The [evidence record](evidence/README.md) contains sanitized excerpts, redaction coordinates, and hashes of the published image copies. Those publication hashes are not original acquisition hashes.
-
-## What I learned
-
-I learned to distinguish a suspicious pattern from a confirmed compromise. Repeated failures justified further investigation, but a successful response in another session did not prove administrator access. My strongest takeaway was to connect conclusions to the specific account, session, and time supported by the evidence—and to state clearly when that context is missing.
+**How I would explain this lab in an interview:** I identified FTP and RDP exposure in an isolated network, recovered a weak administrative credential through a dictionary exercise, and used it for remote access. I then switched to incident response, collected host and connection information with the supplied tools, hashed the collection file, and reviewed FTP authentication records. The exercise taught me to connect the attack path to host evidence while keeping accounts, sessions, and event outcomes distinct.
