@@ -42,6 +42,20 @@ The supplied instructions directed navigation through **Computer → Local Disk 
 
 The screenshots show **ex261031.log** and **flag6.log** open in Notepad with the MSFTPSVC1 directory visible behind them. The challenge screenshot shows a search for the challenge marker. Not every prescribed click was captured.
 
+## Screenshot evidence
+
+### E1 — Dated FTP authentication log
+
+![Dated FTP log showing separate successful responses and repeated administrator failures; password arguments redacted](evidence/ftp-authentication-log-redacted.png)
+
+*Figure 1. Learner-supplied screenshot of ex261031.log. Solid black boxes cover the two potentially sensitive PASS arguments. The 230 responses precede the repeated administrator failures; the successful account is not shown.*
+
+### E2 — Loopback challenge log
+
+![Loopback FTP log with success response and challenge search; challenge answer redacted](evidence/ftp-loopback-challenge-redacted.png)
+
+*Figure 2. Learner-supplied screenshot of flag6.log. A solid black box covers the challenge answer. The loopback address, session identifier, and 230 response remain visible.*
+
 ## Verified findings
 
 ### Repeated administrator authentication failures
@@ -102,7 +116,7 @@ Times are reported as displayed. Without log timezone headers or clock validatio
 
 ## Evidence and publication
 
-The [sanitized evidence summary](evidence/README.md) contains the source inventory and credential-free excerpts. Original screenshots and raw logs are excluded because one screenshot contains a potentially sensitive PASS argument. Published excerpts omit that argument, challenge values, and unnecessary client-address details.
+The [sanitized evidence summary](evidence/README.md) contains the source inventory, redaction details, and credential-free excerpts. Both supplied screenshots are embedded above as redacted PNG copies. Original unredacted screenshots and raw logs are excluded. The PNGs retain their original dimensions; only the documented solid black redaction boxes alter their visible content. Text excerpts replace the non-loopback client address with a placeholder; the screenshots retain the lab-recorded address without attributing it to a real-world actor.
 
 ## Conclusion
 
