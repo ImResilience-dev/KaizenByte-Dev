@@ -13,3 +13,5 @@ Each lab should include a clear scope, sanitized evidence, validated findings, a
 ## Forensic imaging and integrity verification
 
 - [SEC335 Module 2 — Hashing Data Sets](sec335-module-2-hashing-data-sets/): EnCase and Kali methodology, screenshot-supported HashCalc comparison, and evidence limitations.
+
+- [SEC335 Module 2 — The Imaging Process](sec335-module-2-the-imaging-process/): FTK verification, Windows dd methodology, Kali acquisition output, and evidence-preservation lessons.
