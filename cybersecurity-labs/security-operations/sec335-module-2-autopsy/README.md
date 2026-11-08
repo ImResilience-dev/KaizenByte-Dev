@@ -32,7 +32,7 @@ This report covers only the Autopsy exercise. EnCase acquisition, Kali hashing, 
 | Field | Recorded value | Basis |
 | --- | --- | --- |
 | Case name | NTFS Capture | Learner-supplied lab details |
-| Base directory | `H:\\Case` | Learner-supplied lab details |
+| Base directory | `H:\Case` | Learner-supplied lab details |
 | Case identifier | Lab07 | Learner-supplied lab details |
 | Examiner | Student | Training identifier supplied by learner |
 | Tool | Autopsy 3.0.8 | Learner-supplied environment |
